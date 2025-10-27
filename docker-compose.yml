@@ -1,0 +1,137 @@
+version: '3.8'
+
+
+##Los puertos del comando "ports" son los que estan ligados al frontend o backend del servicio correspondiente
+services:
+  # PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: combustible_db
+    restart: unless-stopped
+    env_file:
+      - ./.env #  variables de entorno
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persistencia
+      - combustible_db_data:/var/lib/postgresql/data
+
+  # --- BACK END --- 
+
+  #Backend Distibuidor
+  distribuidor:
+    build:
+      context: ./backend/distribuidor
+      dockerfile: Dockerfile
+    container_name: distribuidor
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8080:8080"
+    environment:
+      # La URL de la DB se construye con las variables del .env
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      EMPRESA_HOST: "empresa:8081"
+      SURTIDOR_HOST: "surtidor:8082"
+    depends_on:
+      - db
+
+  #Backend Empresa
+  empresa:
+    build:
+      context: ./backend/empresa
+      dockerfile: Dockerfile
+    container_name: empresa
+    restart: unless-stopped
+    env_file:
+      - ./.env 
+    ports:
+      - "8081:8081"
+    environment:
+      # La URL de la DB se construye con las variables del .env
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      DISTRIBUIDOR_HOST: "distribuidor:8080"
+    depends_on:
+      - db
+
+  #Backend Surtidor
+  surtidor:
+    build:
+      context: ./backend/surtidor
+      dockerfile: Dockerfile
+    container_name: surtidor
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      # El surtidor se comunica con el distribuidor
+      DISTRIBUIDOR_HOST: "distribuidor:8080"
+    depends_on:
+      - distribuidor
+
+
+  # --- FRONT END ---
+
+  #Distribuidor
+  distribuidor-ui:
+    build:
+      context: ./frontend/distribuidor-ui
+      dockerfile: Dockerfile
+    container_name: distribuidor-ui
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # monta el codigo fuente para hot-reloading
+      - ./frontend/distribuidor-ui:/app
+      # excluye node_modules del montaje para usar los del contenedor
+      - /app/node_modules
+    environment:
+      # La URL del backend (usa el puerto del HOST del backend correspondiente)
+      REACT_APP_API_URL: "http://localhost:8080"
+    depends_on:
+      - distribuidor
+
+  #Empresa
+  empresa-ui:
+    build:
+      context: ./frontend/empresa-ui
+      dockerfile: Dockerfile
+    container_name: empresa-ui
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./frontend/empresa-ui:/app
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: "http://localhost:8081"
+    depends_on:
+      - empresa
+
+  #Frontend Surtido
+  surtidor-ui:
+    build:
+      context: ./frontend/surtidor-ui
+      dockerfile: Dockerfile
+    container_name: surtidor-ui
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./frontend/surtidor-ui:/app
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: "http://localhost:8082"
+    depends_on:
+      - surtidor
+
+# Define el volumen para persistir los datos de la DB
+volumes:
+  combustible_db_data:
+

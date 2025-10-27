@@ -1,7 +1,10 @@
 # --- BUILDER- --
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
+
+#descargar paquetes repositorio git
+RUN apk --no-cache add git
 
 #se define primero para que no vuelva a descargar dependencias si no hay cambios
 # archivos de módulos de Go
@@ -28,6 +31,6 @@ WORKDIR /app
 COPY --from=builder /app/main .
 
 
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["./main"]
