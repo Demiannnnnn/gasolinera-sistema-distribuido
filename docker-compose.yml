@@ -1,48 +1,74 @@
 version: '3.8'
 
-
-##Los puertos del comando "ports" son los que estan ligados al frontend o backend del servicio correspondiente
 services:
-  # PostgreSQL
-  db:
+  
+   # --- bases de datos ---
+  
+  # db para la empresa independiente capa 3 
+  db_empresa:
     image: postgres:15-alpine
-    container_name: combustible_db
+    container_name: db_empresa
     restart: unless-stopped
     env_file:
-      - ./.env #  variables de entorno
+      - ./.env 
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: db_empresa
     ports:
-      - "5432:5432"
+      - "5435:5432" # Expuesto al host
     volumes:
-      # Persistencia
-      - combustible_db_data:/var/lib/postgresql/data
-      - ./db:/docker-entrypoint-initdb.d
+      - db_empresa_data:/var/lib/postgresql/data
+      - ./db/db_empresa.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
-  # --- BACK END --- 
-
-  #Backend Distibuidor
-  distribuidor:
-    build:
-      context: ./backend/distribuidor
-      dockerfile: Dockerfile
-    container_name: distribuidor
+  # DB Local para Distribuidor 1
+  db_distribuidor1:
+    image: postgres:15-alpine
+    container_name: db_distribuidor_1
     restart: unless-stopped
     env_file:
-      - ./.env
-    ports:
-      - "8080:8080"
+      - ./.env 
     environment:
-      # La URL de la DB se construye con las variables del .env
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
-      EMPRESA_HOST: "empresa:8081"
-      SURTIDOR_HOST: "surtidor:8082"
-    depends_on:
-      - db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: db_distribuidor_1
+    volumes:
+      - db_distribuidor1_data:/var/lib/postgresql/data
+      - ./db/db_distribuidor_1.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
-  #Backend Empresa
+  #  DB Local para Distribuidor 2
+  db_distribuidor2:
+    image: postgres:15-alpine
+    container_name: db_distribuidor_2
+    restart: unless-stopped
+    env_file:
+      - ./.env 
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: db_distribuidor_2
+    volumes:
+      - db_distribuidor2_data:/var/lib/postgresql/data
+      - ./db/db_distribuidor_2.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  #  DB Local para Distribuidor 3
+  db_distribuidor3:
+    image: postgres:15-alpine
+    container_name: db_distribuidor_3
+    restart: unless-stopped
+    env_file:
+      - ./.env 
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: db_distribuidor_3
+    volumes:
+      - db_distribuidor3_data:/var/lib/postgresql/data
+      - ./db/db_distribuidor_3.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  # === BACK ENDS ===
+
+  # Backend Empresa (Nivel 3)
   empresa:
     build:
       context: ./backend/empresa
@@ -50,55 +76,84 @@ services:
     container_name: empresa
     restart: unless-stopped
     env_file:
-      - ./.env 
+      - ./.env
     ports:
       - "8081:8081"
     environment:
-      # La URL de la DB se construye con las variables del .env
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
-      DISTRIBUIDOR_HOST: "distribuidor:8080"
+      # Conexión a su propia DB
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db_empresa:5432/db_empresa?sslmode=disable"
+      DISTRIBUIDOR_1_HOST: "distribuidor1:8080"
+      DISTRIBUIDOR_2_HOST: "distribuidor2:8083"
+      DISTRIBUIDOR_3_HOST: "distribuidor3:8084"
     depends_on:
-      - db
+      - db_empresa
 
-  #Backend Surtidor
-  surtidor:
+  #  Backend Distribuidor 1 (Nivel 2)
+  distribuidor1:
     build:
-      context: ./backend/surtidor
+      context: ./backend/distribuidor
       dockerfile: Dockerfile
-    container_name: surtidor
+    container_name: distribuidor1
     restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
-      - "8082:8082"
+      - "8080:8080"
     environment:
-      # El surtidor se comunica con el distribuidor
-      DISTRIBUIDOR_HOST: "distribuidor:8080"
+      DB_HOST_INTERNAL: "db_distribuidor1" 
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_1?sslmode=disable"
+      EMPRESA_HOST: "empresa:8081"
+  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
+      DISTRIBUIDOR_ID: "1" 
     depends_on:
-      - distribuidor
+      - db_distribuidor1
+      - empresa
 
-
-  # --- FRONT END ---
-
-  #Distribuidor
-  distribuidor-ui:
+  #  Backend Distribuidor 2 (Nivel 2)
+  distribuidor2:
     build:
-      context: ./frontend/distribuidor-ui
+      context: ./backend/distribuidor
       dockerfile: Dockerfile
-    container_name: distribuidor-ui
+    container_name: distribuidor2
     restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
-      - "3000:3000"
-    volumes:
-      # monta el codigo fuente para hot-reloading
-      - ./frontend/distribuidor-ui:/app
-      # excluye node_modules del montaje para usar los del contenedor
-      - /app/node_modules
+      - "8083:8083"
     environment:
-      # La URL del backend (usa el puerto del HOST del backend correspondiente)
-      REACT_APP_API_URL: "http://localhost:8080"
+      DB_HOST_INTERNAL: "db_distribuidor2" 
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_2?sslmode=disable"
+      EMPRESA_HOST: "empresa:8081"
+  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
+      DISTRIBUIDOR_ID: "2"
     depends_on:
-      - distribuidor
+      - db_distribuidor2
+      - empresa
 
-  #Empresa
+  # 🚚 Backend Distribuidor 3 (Nivel 2)
+  distribuidor3:
+    build:
+      context: ./backend/distribuidor
+      dockerfile: Dockerfile
+    container_name: distribuidor3
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "8084:8084"
+    environment:
+      DB_HOST_INTERNAL: "db_distribuidor3" 
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_3?sslmode=disable"
+      EMPRESA_HOST: "empresa:8081"
+  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
+      DISTRIBUIDOR_ID: "3"
+    depends_on:
+      - db_distribuidor3
+      - empresa
+
+  # === FRONT ENDS (Se mantienen sin cambios, solo dependen de los nuevos backends) ===
+
+  # 🖥️ Empresa UI
   empresa-ui:
     build:
       context: ./frontend/empresa-ui
@@ -115,24 +170,66 @@ services:
     depends_on:
       - empresa
 
-  #Frontend Surtido
-  surtidor-ui:
+  # 🖥️ Distribuidor 1 UI
+  distribuidor1-ui:
     build:
-      context: ./frontend/surtidor-ui
+      context: ./frontend/distribuidor-ui
       dockerfile: Dockerfile
-    container_name: surtidor-ui
+    container_name: distribuidor1-ui
     restart: unless-stopped
     ports:
-      - "3002:3002"
+      - "3000:3000"
     volumes:
-      - ./frontend/surtidor-ui:/app
+      - ./frontend/distribuidor-ui:/app
       - /app/node_modules
     environment:
-      REACT_APP_API_URL: "http://localhost:8082"
+      REACT_APP_API_URL: "http://localhost:8080"
     depends_on:
-      - surtidor
+      - distribuidor1
 
-# Define el volumen para persistir los datos de la DB
+  # 🖥️ Distribuidor 2 UI
+  distribuidor2-ui:
+    build:
+      context: ./frontend/distribuidor-ui
+      dockerfile: Dockerfile
+    container_name: distribuidor2-ui
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./frontend/distribuidor-ui:/app
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: "http://localhost:8083"
+    depends_on:
+      - distribuidor2
+
+  # 🖥️ Distribuidor 3 UI
+  distribuidor3-ui:
+    build:
+      context: ./frontend/distribuidor-ui
+      dockerfile: Dockerfile
+    container_name: distribuidor3-ui
+    restart: unless-stopped
+    ports:
+      - "3004:3004"
+    volumes:
+      - ./frontend/distribuidor-ui:/app
+      - /app/node_modules
+    environment:
+      REACT_APP_API_URL: "http://localhost:8084"
+    depends_on:
+      - distribuidor3
+
+  # Surtidores integrados
+  # Nota: el servicio `surtidor` se ha eliminado del backend. Los surtidores
+  # se modelarán como estructuras dentro de cada servicio `distribuidor`.
+  # Si todavía necesitas una UI para pruebas locales, puedes mantener
+  # ./frontend/surtidor-ui y ejecutar su servidor por separado.
+
+# Define los volúmenes para persistir los datos de cada DB
 volumes:
-  combustible_db_data:
-
+  db_empresa_data:
+  db_distribuidor1_data:
+  db_distribuidor2_data:
+  db_distribuidor3_data:
