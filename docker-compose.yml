@@ -82,7 +82,7 @@ services:
     environment:
       # Conexión a su propia DB
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db_empresa:5432/db_empresa?sslmode=disable"
-      DISTRIBUIDOR_1_HOST: "distribuidor1:8080"
+      DISTRIBUIDOR_1_HOST: "distribuidor1:8081"
       DISTRIBUIDOR_2_HOST: "distribuidor2:8083"
       DISTRIBUIDOR_3_HOST: "distribuidor3:8084"
     depends_on:
@@ -102,9 +102,8 @@ services:
     environment:
       DB_HOST_INTERNAL: "db_distribuidor1" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_1?sslmode=disable"
-      EMPRESA_HOST: "empresa:8081"
-  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
-      DISTRIBUIDOR_ID: "1" 
+      EMPRESA_HOST: "${EMPRESA_HOST}"
+      DISTRIBUIDOR_ID: "${DISTRIBUIDOR_1_ID}"
     depends_on:
       - db_distribuidor1
       - empresa
@@ -123,9 +122,8 @@ services:
     environment:
       DB_HOST_INTERNAL: "db_distribuidor2" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_2?sslmode=disable"
-      EMPRESA_HOST: "empresa:8081"
-  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
-      DISTRIBUIDOR_ID: "2"
+      EMPRESA_HOST: "${EMPRESA_HOST}"
+      DISTRIBUIDOR_ID: "${DISTRIBUIDOR_2_ID}"
     depends_on:
       - db_distribuidor2
       - empresa
@@ -144,9 +142,8 @@ services:
     environment:
       DB_HOST_INTERNAL: "db_distribuidor3" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_3?sslmode=disable"
-      EMPRESA_HOST: "empresa:8081"
-  # SURTIDOR_HOST removed: los surtidores ahora estarán dentro de cada distribuidor
-      DISTRIBUIDOR_ID: "3"
+      EMPRESA_HOST: "${EMPRESA_HOST}"
+      DISTRIBUIDOR_ID: "${DISTRIBUIDOR_3_ID}"
     depends_on:
       - db_distribuidor3
       - empresa
@@ -178,12 +175,13 @@ services:
     container_name: distribuidor1-ui
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3002:3002"
     volumes:
       - ./frontend/distribuidor-ui:/app
       - /app/node_modules
     environment:
       REACT_APP_API_URL: "http://localhost:8080"
+      PORT: 3002
     depends_on:
       - distribuidor1
 
@@ -201,6 +199,7 @@ services:
       - /app/node_modules
     environment:
       REACT_APP_API_URL: "http://localhost:8083"
+      PORT: 3003
     depends_on:
       - distribuidor2
 
@@ -218,6 +217,7 @@ services:
       - /app/node_modules
     environment:
       REACT_APP_API_URL: "http://localhost:8084"
+      PORT: 3004
     depends_on:
       - distribuidor3
 

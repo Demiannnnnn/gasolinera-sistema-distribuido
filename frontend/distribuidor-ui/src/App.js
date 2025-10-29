@@ -1,23 +1,17 @@
-import logo from './logo.svg';
+import React from 'react';
 import './App.css';
+import DistribuidorMonitor from './components/DistribuidorMonitor';
 
 function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+        <h1>🛢️ Monitor de Distribuidores</h1>
+        <p>Sistema de monitoreo en tiempo real</p>
       </header>
+      <main className="App-main">
+        <DistribuidorMonitor />
+      </main>
     </div>
   );
 }
