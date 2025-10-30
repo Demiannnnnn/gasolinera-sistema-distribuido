@@ -100,6 +100,7 @@ services:
     ports:
       - "8080:8080"
     environment:
+      PORT: 8080
       DB_HOST_INTERNAL: "db_distribuidor1" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_1?sslmode=disable"
       EMPRESA_HOST: "${EMPRESA_HOST}"
@@ -120,6 +121,7 @@ services:
     ports:
       - "8083:8083"
     environment:
+      PORT: 8083
       DB_HOST_INTERNAL: "db_distribuidor2" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_2?sslmode=disable"
       EMPRESA_HOST: "${EMPRESA_HOST}"
@@ -140,6 +142,7 @@ services:
     ports:
       - "8084:8084"
     environment:
+      PORT: 8084
       DB_HOST_INTERNAL: "db_distribuidor3" 
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DB_HOST_INTERNAL}:5432/db_distribuidor_3?sslmode=disable"
       EMPRESA_HOST: "${EMPRESA_HOST}"
@@ -163,16 +166,17 @@ services:
       - ./frontend/empresa-ui:/app
       - /app/node_modules
     environment:
+      PORT: 3001
       REACT_APP_API_URL: "http://localhost:8081"
     depends_on:
       - empresa
 
-  # 🖥️ Distribuidor 1 UI
-  distribuidor1-ui:
+  # 🖥️ Monitor de Distribuidores UI
+  distribuidor-monitor-ui:
     build:
       context: ./frontend/distribuidor-ui
       dockerfile: Dockerfile
-    container_name: distribuidor1-ui
+    container_name: distribuidor-monitor-ui
     restart: unless-stopped
     ports:
       - "3002:3002"
@@ -180,45 +184,32 @@ services:
       - ./frontend/distribuidor-ui:/app
       - /app/node_modules
     environment:
-      REACT_APP_API_URL: "http://localhost:8080"
       PORT: 3002
+      REACT_APP_DIST1_URL: "http://localhost:8080"
+      REACT_APP_DIST2_URL: "http://localhost:8083"
+      REACT_APP_DIST3_URL: "http://localhost:8084"
     depends_on:
       - distribuidor1
-
-  # 🖥️ Distribuidor 2 UI
-  distribuidor2-ui:
-    build:
-      context: ./frontend/distribuidor-ui
-      dockerfile: Dockerfile
-    container_name: distribuidor2-ui
-    restart: unless-stopped
-    ports:
-      - "3003:3003"
-    volumes:
-      - ./frontend/distribuidor-ui:/app
-      - /app/node_modules
-    environment:
-      REACT_APP_API_URL: "http://localhost:8083"
-      PORT: 3003
-    depends_on:
       - distribuidor2
+      - distribuidor3
 
-  # 🖥️ Distribuidor 3 UI
-  distribuidor3-ui:
+  # ⛽ Surtidor UI
+  surtidor-ui:
     build:
-      context: ./frontend/distribuidor-ui
+      context: ./frontend/surtidor-ui
       dockerfile: Dockerfile
-    container_name: distribuidor3-ui
+    container_name: surtidor-ui
     restart: unless-stopped
     ports:
-      - "3004:3004"
+      - "3000:3000"
     volumes:
-      - ./frontend/distribuidor-ui:/app
+      - ./frontend/surtidor-ui:/app
       - /app/node_modules
     environment:
-      REACT_APP_API_URL: "http://localhost:8084"
-      PORT: 3004
+      PORT: 3000
     depends_on:
+      - distribuidor1
+      - distribuidor2
       - distribuidor3
 
   # Surtidores integrados

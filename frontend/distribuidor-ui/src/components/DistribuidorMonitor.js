@@ -9,9 +9,9 @@ const DistribuidorMonitor = () => {
 
     // Lista de distribuidores posibles (dinámico)
     const distribuidoresConfig = [
-        { id: 'DISTRIBUIDOR_1', name: 'Distribuidor 1', url: process.env.REACT_APP_API_URL || 'http://localhost:8080', color: '#4CAF50' },
-        { id: 'DISTRIBUIDOR_2', name: 'Distribuidor 2', url: 'http://localhost:8083', color: '#2196F3' },
-        { id: 'DISTRIBUIDOR_3', name: 'Distribuidor 3', url: 'http://localhost:8084', color: '#9C27B0' }
+        { id: 'DISTRIBUIDOR_1', name: 'Distribuidor 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
+        { id: 'DISTRIBUIDOR_2', name: 'Distribuidor 2', url: process.env.REACT_APP_DIST2_URL || 'http://localhost:8083', color: '#2196F3' },
+        { id: 'DISTRIBUIDOR_3', name: 'Distribuidor 3', url: process.env.REACT_APP_DIST3_URL || 'http://localhost:8084', color: '#9C27B0' }
     ];
 
     // Verificar qué distribuidores están activos

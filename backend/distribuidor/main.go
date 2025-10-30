@@ -318,25 +318,12 @@ func setupHTTPServer(dist *distribuidor) *http.Server {
 	// Obtener puerto de variable de entorno o usar puerto por defecto
 	port := os.Getenv("PORT")
 	if port == "" {
-		// Determinar puerto basado en el ID del distribuidor
-		distribuidorID := os.Getenv("DISTRIBUIDOR_ID")
-		switch distribuidorID {
-		case "DISTRIBUIDOR_1":
-			port = ":8080"
-		case "DISTRIBUIDOR_2":
-			port = ":8083"
-		case "DISTRIBUIDOR_3":
-			port = ":8084"
-		default:
-			port = ":8080"
-		}
-	} else {
-		port = ":" + port
+		port = "8080" // Puerto por defecto si no se especifica
 	}
 
 	// Configurar servidor
 	server := &http.Server{
-		Addr:    port,
+		Addr:    ":" + port,
 		Handler: handler,
 	}
 
