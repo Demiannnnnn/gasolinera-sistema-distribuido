@@ -21,9 +21,41 @@ const Surtidor = ({ distribuidorUrl }) => {
             }
         };
 
+        fetchVentas();
         const interval = setInterval(fetchVentas, 2000);
         return () => clearInterval(interval);
     }, [surtidorId, distribuidorUrl]);
+
+    // resumen rápido del surtidor seleccionado
+    const resumen = {
+        totalVentas: ventas.length,
+        ingresos: ventas.reduce((s, v) => s + (v.total_venta || 0), 0),
+        litros: ventas.reduce((s, v) => s + (v.litros_vendidos || 0), 0),
+        ultimaVenta: ventas.length > 0 ? ventas[0].fecha_venta : null
+    };
+
+    // datos para sparkline: tomar las últimas 12 ventas y representar total_venta
+    const sparkValues = ventas.slice(0, 12).map(v => Number(v.total_venta || 0)).reverse();
+
+    const renderSparkline = (values = []) => {
+        const width = 220;
+        const height = 48;
+        const padding = 4;
+        const n = values.length || 1;
+        const max = Math.max(...values, 1);
+
+        const points = values.map((v, i) => {
+            const x = padding + (i * (width - padding * 2)) / (n - 1 || 1);
+            const y = height - padding - (v / max) * (height - padding * 2);
+            return `${x},${y}`;
+        }).join(' ');
+
+        return (
+            <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden>
+                <polyline fill="none" stroke="#0ea5a4" strokeWidth="2" points={points} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        );
+    };
 
     return (
         <div className="surtidor-container">
@@ -42,33 +74,61 @@ const Surtidor = ({ distribuidorUrl }) => {
 
             {error && <p className="error-message">{error}</p>}
 
+            <div className="surtidor-summary">
+                <div className="summary-card">
+                    <div className="summary-title">Ventas</div>
+                    <div className="summary-value">{resumen.totalVentas}</div>
+                </div>
+                <div className="summary-card">
+                    <div className="summary-title">Ingresos</div>
+                    <div className="summary-value">${resumen.ingresos.toFixed(2)}</div>
+                </div>
+                <div className="summary-card">
+                    <div className="summary-title">Litros</div>
+                    <div className="summary-value">{resumen.litros.toFixed(2)}L</div>
+                </div>
+                <div className="summary-card">
+                    <div className="summary-title">Última</div>
+                    <div className="summary-value">{resumen.ultimaVenta ? new Date(resumen.ultimaVenta).toLocaleTimeString() : 'N/A'}</div>
+                </div>
+            </div>
+
             <div className="ventas-list">
-                <h3>Últimas Ventas de {surtidorId}</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0 }}>Últimas Ventas de {surtidorId}</h3>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <div style={{ fontSize: 12, color: '#6b7280' }}>Últimas {sparkValues.length} ventas</div>
+                        {renderSparkline(sparkValues)}
+                    </div>
+                </div>
+
                 {ventas.length > 0 ? (
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID Venta</th>
-                                <th>Combustible</th>
-                                <th>Litros</th>
-                                <th>Precio/Litro</th>
-                                <th>Total</th>
-                                <th>Fecha</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {ventas.map(venta => (
-                                <tr key={venta.id}>
-                                    <td>{venta.id}</td>
-                                    <td>{venta.tipo_combustible}</td>
-                                    <td>{venta.litros_vendidos.toFixed(2)}</td>
-                                    <td>${venta.precio_por_litro.toFixed(2)}</td>
-                                    <td>${venta.total_venta.toFixed(2)}</td>
-                                    <td>{new Date(venta.fecha_venta).toLocaleTimeString()}</td>
+                    <div className="ventas-table-wrapper">
+                        <table className="ventas-table">
+                            <thead>
+                                <tr>
+                                    <th>ID Venta</th>
+                                    <th>Combustible</th>
+                                    <th>Litros</th>
+                                    <th>Precio/Litro</th>
+                                    <th>Total</th>
+                                    <th>Fecha</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {ventas.map(venta => (
+                                    <tr key={venta.id}>
+                                        <td>{venta.id}</td>
+                                        <td>{venta.tipo_combustible}</td>
+                                        <td>{(venta.litros_vendidos || 0).toFixed(2)}</td>
+                                        <td>${(venta.precio_por_litro || 0).toFixed(2)}</td>
+                                        <td>${(venta.total_venta || 0).toFixed(2)}</td>
+                                        <td>{venta.fecha_venta ? new Date(venta.fecha_venta).toLocaleTimeString() : 'Ahora'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 ) : (
                     <p>No hay ventas para mostrar.</p>
                 )}

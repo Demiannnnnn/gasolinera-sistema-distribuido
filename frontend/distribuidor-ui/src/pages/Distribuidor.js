@@ -6,6 +6,7 @@ const Distribuidor = ({ distributorId }) => {
     const [distribuidor, setDistribuidor] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [paused, setPaused] = useState(false);
 
     const distribuidoresConfig = [
         { id: 'DISTRIBUIDOR_1', name: 'Distribuidor 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
@@ -52,9 +53,10 @@ const Distribuidor = ({ distributorId }) => {
 
     useEffect(() => {
         fetchDistribuidorData();
+        if (paused) return;
         const interval = setInterval(fetchDistribuidorData, 3000);
         return () => clearInterval(interval);
-    }, [distributorId]);
+    }, [distributorId, paused]);
 
     if (loading) {
         return (
@@ -80,9 +82,55 @@ const Distribuidor = ({ distributorId }) => {
     }
 
     return (
-        <div>
-            <h1>{distribuidor.name}</h1>
-            <Surtidor distribuidorUrl={distribuidor.url} />
+        <div className="distribuidor-page">
+            <header className="dist-header">
+                <div>
+                    <h1 className="dist-title">{distribuidor.name}</h1>
+                    <div className="dist-sub">Estado: <span className={`status-badge status-${distribuidor.status}`}>{distribuidor.status}</span></div>
+                    <div className="dist-sub">Última actualización: {distribuidor.lastUpdate ? new Date(distribuidor.lastUpdate).toLocaleTimeString() : 'Nunca'}</div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <button className="btn" onClick={() => fetchDistribuidorData()}>Actualizar</button>
+                    <button className={`btn ${paused ? '' : 'btn-primary'}`} onClick={() => setPaused(!paused)}>{paused ? 'Reanudar' : 'Pausar'}</button>
+                </div>
+            </header>
+
+            {/* Estadísticas globales */}
+            <section className="stats-grid">
+                <div className="stat-card">
+                    <h3>Ventas hoy</h3>
+                    <p className="stat-value">{distribuidor.stats?.total_ventas || 0}</p>
+                </div>
+                <div className="stat-card">
+                    <h3>Ingresos</h3>
+                    <p className="stat-value">${(distribuidor.stats?.total_ingresos || 0).toFixed(2)}</p>
+                </div>
+                <div className="stat-card">
+                    <h3>Surtidores activos</h3>
+                    <p className="stat-value">{distribuidor.stats?.surtidores_activos || 0}</p>
+                </div>
+                <div className="stat-card">
+                    <h3>Factor util.</h3>
+                    <p className="stat-value">{(distribuidor.stats?.factor_utilidad || 1).toFixed(3)}</p>
+                </div>
+            </section>
+
+            <main className="dist-main">
+                <aside className="surtidor-aside">
+                    <h3>Surtidores</h3>
+                    {/* render Surtidor component which provides selector + table */}
+                    <Surtidor distribuidorUrl={distribuidor.url} />
+                </aside>
+
+                <section className="dist-info">
+                    <h3>Actividad reciente</h3>
+                    <div className="info-placeholder">
+                        {/* space to later add charts or transaction stream */}
+                        <p>Resumen y gráficos rápidos serán agregados aquí.</p>
+                    </div>
+                </section>
+            </main>
         </div>
     );
 };
