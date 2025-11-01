@@ -1,19 +1,12 @@
-
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const Surtidor = () => {
+const Surtidor = ({ distribuidorUrl }) => {
     const [surtidorId, setSurtidorId] = useState('surtidor-1');
     const [ventas, setVentas] = useState([]);
     const [error, setError] = useState(null);
-    const [distribuidorUrl, setDistribuidorUrl] = useState('http://localhost:8080'); // Default to distribuidor1
 
     const surtidores = ['surtidor-1', 'surtidor-2', 'surtidor-3', 'surtidor-4', 'surtidor-5'];
-    const distribuidores = [
-        { name: 'Distribuidor 1', url: 'http://localhost:8080' },
-        { name: 'Distribuidor 2', url: 'http://localhost:8083' },
-        { name: 'Distribuidor 3', url: 'http://localhost:8084' },
-    ];
 
     useEffect(() => {
         const fetchVentas = async () => {
@@ -37,14 +30,6 @@ const Surtidor = () => {
             <h2>Monitor de Surtidor</h2>
 
             <div className="selectors">
-                <div className="selector">
-                    <label htmlFor="distribuidor-select">Distribuidor:</label>
-                    <select id="distribuidor-select" value={distribuidorUrl} onChange={e => setDistribuidorUrl(e.target.value)}>
-                        {distribuidores.map(d => (
-                            <option key={d.url} value={d.url}>{d.name}</option>
-                        ))}
-                    </select>
-                </div>
                 <div className="selector">
                     <label htmlFor="surtidor-select">Surtidor:</label>
                     <select id="surtidor-select" value={surtidorId} onChange={e => setSurtidorId(e.target.value)}>

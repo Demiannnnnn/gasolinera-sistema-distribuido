@@ -6,12 +6,15 @@ const DistribuidorMonitor = () => {
     const [distribuidores, setDistribuidores] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [paused, setPaused] = useState(false);
+    const [query, setQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
 
     // Lista de distribuidores posibles (dinámico)
     const distribuidoresConfig = [
-        { id: 'DISTRIBUIDOR_1', name: 'Distribuidor 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
-        { id: 'DISTRIBUIDOR_2', name: 'Distribuidor 2', url: process.env.REACT_APP_DIST2_URL || 'http://localhost:8083', color: '#2196F3' },
-        { id: 'DISTRIBUIDOR_3', name: 'Distribuidor 3', url: process.env.REACT_APP_DIST3_URL || 'http://localhost:8084', color: '#9C27B0' }
+        { id: 'DISTRIBUIDOR_1', name: 'Punto de Venta 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
+        { id: 'DISTRIBUIDOR_2', name: 'Punto de Venta 2', url: process.env.REACT_APP_DIST2_URL || 'http://localhost:8083', color: '#2196F3' },
+        { id: 'DISTRIBUIDOR_3', name: 'Punto de Venta 3', url: process.env.REACT_APP_DIST3_URL || 'http://localhost:8084', color: '#9C27B0' }
     ];
 
     // Verificar qué distribuidores están activos
@@ -104,15 +107,17 @@ const DistribuidorMonitor = () => {
         }
     };
 
-    // Efecto para cargar datos iniciales y configurar polling
+    // Efecto para cargar datos iniciales y configurar polling (respeta "paused")
     useEffect(() => {
         updateDistribuidoresData();
+
+        if (paused) return; // no polling cuando está en pausa
 
         // Actualizar cada 3 segundos
         const interval = setInterval(updateDistribuidoresData, 3000);
 
         return () => clearInterval(interval);
-    }, []);
+    }, [paused]);
 
     // Funciones de utilidad
     const getDistribuidoresOnline = () => distribuidores.filter(d => d.status === 'online').length;
@@ -124,7 +129,7 @@ const DistribuidorMonitor = () => {
             <div className="monitor-container">
                 <div className="no-data">
                     <div className="loading-spinner"></div>
-                    <p>Conectando con distribuidores...</p>
+                    <p>Conectando con puntos de venta...</p>
                 </div>
             </div>
         );
@@ -132,26 +137,50 @@ const DistribuidorMonitor = () => {
 
     return (
         <div>
+            {/* Controls: search, filter, pause */}
+            <div className="control-bar" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                        className="search-input"
+                        placeholder="Buscar punto de venta..."
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e6e9ee' }}
+                    />
+                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #e6e9ee' }}>
+                        <option value="all">Todos</option>
+                        <option value="online">Online</option>
+                        <option value="offline">Offline</option>
+                    </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className={`btn ${paused ? '' : 'btn-primary'}`} onClick={() => setPaused(!paused)}>
+                        {paused ? 'Reanudar' : 'Pausar actualizaciones'}
+                    </button>
+                </div>
+            </div>
+
             {/* Panel de estadísticas globales */}
             <div className="global-stats">
                 <div className="stats-grid">
                     <div className="stat-item">
                         <h3 className="stat-value">{getDistribuidoresOnline()}/{distribuidores.length}</h3>
-                        <p className="stat-label">Distribuidores Online</p>
+                        <p className="stat-label">Puntos activos</p>
                     </div>
                     <div className="stat-item">
                         <h3 className="stat-value">{getTotalVentas()}</h3>
-                        <p className="stat-label">Total Ventas</p>
+                        <p className="stat-label">Ventas totales</p>
                     </div>
                     <div className="stat-item">
                         <h3 className="stat-value">${getTotalIngresos().toFixed(2)}</h3>
-                        <p className="stat-label">Ingresos Totales</p>
+                        <p className="stat-label">Ingresos totales</p>
                     </div>
                     <div className="stat-item">
                         <h3 className="stat-value">
                             {distribuidores.filter(d => d.status === 'online').length > 0 ? 'Activo' : 'Inactivo'}
                         </h3>
-                        <p className="stat-label">Estado Sistema</p>
+                        <p className="stat-label">Estado del sistema</p>
                     </div>
                 </div>
             </div>
@@ -162,14 +191,23 @@ const DistribuidorMonitor = () => {
                 </div>
             )}
 
-            {/* Grid de distribuidores */}
+            {/* Grid de distribuidores (aplicar filtros) */}
             <div className="monitor-container">
-                {distribuidores.map(distribuidor => (
-                    <DistribuidorCard
-                        key={distribuidor.id}
-                        distribuidor={distribuidor}
-                    />
-                ))}
+                {distribuidores
+                    .filter(d => {
+                        if (!query) return true;
+                        return d.name?.toLowerCase().includes(query.toLowerCase()) || d.id?.toLowerCase().includes(query.toLowerCase());
+                    })
+                    .filter(d => {
+                        if (statusFilter === 'all') return true;
+                        return d.status === statusFilter;
+                    })
+                    .map(distribuidor => (
+                        <DistribuidorCard
+                            key={distribuidor.id}
+                            distribuidor={distribuidor}
+                        />
+                    ))}
             </div>
 
             {distribuidores.length === 0 && !loading && (
