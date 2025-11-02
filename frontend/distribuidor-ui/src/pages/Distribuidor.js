@@ -6,7 +6,8 @@ const Distribuidor = ({ distributorId }) => {
     const [distribuidor, setDistribuidor] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [paused, setPaused] = useState(false);
+    const [paused, setPaused] = useState(false); // Pausa de la UI
+    const [simulationPaused, setSimulationPaused] = useState(false); // Pausa de la simulación
 
     const distribuidoresConfig = [
         { id: 'DISTRIBUIDOR_1', name: 'Distribuidor 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
@@ -14,8 +15,10 @@ const Distribuidor = ({ distributorId }) => {
         { id: 'DISTRIBUIDOR_3', name: 'Distribuidor 3', url: process.env.REACT_APP_DIST3_URL || 'http://localhost:8084', color: '#9C27B0' }
     ];
 
+    const getConfig = () => distribuidoresConfig.find(d => d.id === distributorId);
+
     const fetchDistribuidorData = async () => {
-        const config = distribuidoresConfig.find(d => d.id === distributorId);
+        const config = getConfig();
         if (!config) {
             setError('Distribuidor no encontrado');
             setLoading(false);
@@ -38,24 +41,29 @@ const Distribuidor = ({ distributorId }) => {
             setError(null);
         } catch (error) {
             console.warn(`Error fetching data from ${config.name}:`, error.message);
-            setDistribuidor({
-                ...config,
-                status: 'offline',
-                ventas: [],
-                stats: {},
-                lastUpdate: new Date(),
-                error: error.message
-            });
+            setDistribuidor(prev => ({ ...prev, ...config, status: 'offline', lastUpdate: new Date(), error: error.message }));
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Nueva función para controlar la simulación
+    const toggleSimulation = async () => {
+        const config = getConfig();
+        const action = simulationPaused ? 'resume' : 'pause';
+        try {
+            await axios.post(`${config.url}/surtidores/control`, { action });
+            setSimulationPaused(!simulationPaused);
+        } catch (error) {
+            console.error(`Error al intentar ${action} la simulación:`, error);
+            alert(`No se pudo ${action} la simulación.`);
         }
     };
 
     useEffect(() => {
         fetchDistribuidorData();
         if (paused) return;
-    // polling más frecuente: cada 1 segundo
-    const interval = setInterval(fetchDistribuidorData, 1000);
+        const interval = setInterval(fetchDistribuidorData, 1000);
         return () => clearInterval(interval);
     }, [distributorId, paused]);
 
@@ -93,7 +101,10 @@ const Distribuidor = ({ distributorId }) => {
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <button className="btn" onClick={() => fetchDistribuidorData()}>Actualizar</button>
-                    <button className={`btn ${paused ? '' : 'btn-primary'}`} onClick={() => setPaused(!paused)}>{paused ? 'Reanudar' : 'Pausar'}</button>
+                    {/* Botón para pausar la UI */}
+                    <button className={`btn ${paused ? '' : 'btn-primary'}`} onClick={() => setPaused(!paused)}>{paused ? 'Reanudar UI' : 'Pausar UI'}</button>
+                    {/* NUEVO Botón para pausar la simulación */}
+                    <button className={`btn ${simulationPaused ? '' : 'btn-danger'}`} onClick={toggleSimulation}>{simulationPaused ? 'Reanudar Simulación' : 'Pausar Simulación'}</button>
                 </div>
             </header>
 

@@ -12,7 +12,7 @@ const Surtidor = ({ distribuidorUrl }) => {
         const fetchVentas = async () => {
             try {
                 const response = await axios.get(`${distribuidorUrl}/ventas/recientes?limit=100`);
-                const surtidorVentas = response.data.filter(venta => venta.hilo_id === surtidorId);
+                const surtidorVentas = response.data.filter(venta => venta.surtidor_id === surtidorId);
                 setVentas(surtidorVentas);
                 setError(null);
             } catch (err) {

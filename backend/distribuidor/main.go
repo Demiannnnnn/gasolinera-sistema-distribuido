@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,43 +20,24 @@ import (
 	"github.com/rs/cors"
 )
 
+// --- Variables Globales para Sockets ---
+var surtidorConnections struct {
+	sync.Mutex
+	conns map[net.Conn]bool
+}
+
+// --- Tipos y Constantes ---
 const (
-	Fuel93       = "93"
-	Fuel95       = "95"
-	Fuel97       = "97"
-	FuelDiesel   = "DIESEL"
-	FuelKerosene = "KEROSENE"
-	FuelPetroleo = "PETROLEO"
+	Fuel93     = "93"
+	Fuel95     = "95"
+	Fuel97     = "97"
+	FuelDiesel = "DIESEL"
 )
-
-func GetCombustibleTipo() []string {
-	return []string{
-		Fuel93,
-		Fuel95,
-		Fuel97,
-		FuelDiesel,
-		FuelKerosene,
-		FuelPetroleo,
-	}
-}
-
-// recibe un numero aleatorio y retorna un tipo de combustible
-func CombustibleAleatorio(n int) string {
-	fuels := GetCombustibleTipo()
-	if len(fuels) == 0 {
-		return ""
-	}
-	idx := n % len(fuels)
-	if idx < 0 {
-		idx += len(fuels)
-	}
-	return fuels[idx]
-}
 
 type ventaCombustible struct {
 	DistribuidorID  string    `json:"distribuidor_id"`
 	ID_venta        int       `json:"id"`
-	HiloID          string    `json:"hilo_id"`
+	SurtidorID      string    `json:"surtidor_id"` // Renombrado de HiloID
 	TipoCombustible string    `json:"tipo_combustible"`
 	LitrosVendidos  float64   `json:"litros_vendidos"`
 	PrecioPorLitro  float64   `json:"precio_por_litro"`
@@ -71,45 +55,159 @@ type distribuidor struct {
 	db              *sql.DB
 }
 
+// --- Lógica de Sockets ---
+
+func iniciarServidorSockets(dist *distribuidor) {
+	socketPort := os.Getenv("SOCKET_PORT")
+	if socketPort == "" {
+		socketPort = "9001" // Puerto por defecto
+	}
+	listener, err := net.Listen("tcp", ":"+socketPort)
+	if err != nil {
+		log.Fatalf("Error al iniciar servidor de sockets: %v", err)
+	}
+	defer listener.Close()
+	fmt.Printf("🔌 Servidor de Sockets escuchando en el puerto %s\n", socketPort)
+
+	surtidorConnections.conns = make(map[net.Conn]bool)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error al aceptar conexión de surtidor: %v", err)
+			continue
+		}
+
+		surtidorConnections.Lock()
+		surtidorConnections.conns[conn] = true
+		surtidorConnections.Unlock()
+
+		go handleSurtidorConnection(conn, dist)
+	}
+}
+
+func handleSurtidorConnection(conn net.Conn, dist *distribuidor) {
+	remoteAddr := conn.RemoteAddr().String()
+	fmt.Printf("Surtidor conectado desde %s\n", remoteAddr)
+	defer func() {
+		fmt.Printf("Surtidor desconectado: %s\n", remoteAddr)
+		surtidorConnections.Lock()
+		delete(surtidorConnections.conns, conn)
+		surtidorConnections.Unlock()
+		conn.Close()
+	}()
+
+	reader := bufio.NewReader(conn)
+	for {
+		message, err := reader.ReadString('\n')
+		if err != nil {
+			return // Termina si hay error o se cierra la conexión
+		}
+		// "ID:1;LITROS:25.50;TIPO:97"
+		parts := strings.Split(strings.TrimSpace(message), ";")
+		if len(parts) != 3 {
+			continue
+		}
+
+		surtidorIDStr := strings.Split(parts[0], ":")[1]
+		litrosStr := strings.Split(parts[1], ":")[1]
+		tipo := strings.Split(parts[2], ":")[1]
+
+		litros, _ := strconv.ParseFloat(litrosStr, 64)
+
+		// Procesar la venta recibida
+	realizarVenta(dist, surtidorIDStr, tipo, litros)
+	}
+}
+
+// --- Lógica de Negocio ---
+
 func conectarDB() (*sql.DB, error) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL no configurada")
 	}
-
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("error conectando a DB: %v", err)
 	}
-
-	// Verificar conexión
 	if err = db.Ping(); err != nil {
 		return nil, fmt.Errorf("error verificando conexión DB: %v", err)
 	}
-
 	return db, nil
 }
 
+// Nueva función para cargar datos al iniciar
+func cargarVentasDesdeDB(dist *distribuidor) error {
+	if dist.db == nil {
+		return fmt.Errorf("La conexión a la base de datos no está disponible")
+	}
+
+	rows, err := dist.db.Query("SELECT distribuidor_id, id, hilo_id, tipo_combustible, litros_vendidos, precio_por_litro, total_venta, fecha_venta, numero_factura FROM ventas_combustible ORDER BY id ASC")
+	if err != nil {
+		return fmt.Errorf("error al consultar ventas: %v", err)
+	}
+	defer rows.Close()
+
+	dist.mutex.Lock()
+	defer dist.mutex.Unlock()
+
+	ventasCargadas := 0
+	for rows.Next() {
+		var v ventaCombustible
+		// El ID de la venta no se escanea porque es autoincremental en la DB
+		if err := rows.Scan(&v.DistribuidorID, &v.ID_venta, &v.SurtidorID, &v.TipoCombustible, &v.LitrosVendidos, &v.PrecioPorLitro, &v.TotalVenta, &v.FechaVenta, &v.NumeroFactura); err != nil {
+			log.Printf("Error al escanear fila de venta: %v", err)
+			continue
+		}
+		v.Persistida = true // Marcar como persistida ya que viene de la DB
+		dist.listaVentas = append(dist.listaVentas, v)
+		ventasCargadas++
+	}
+
+	fmt.Printf("📦 %d ventas cargadas desde la base de datos.\n", ventasCargadas)
+	return nil
+}
+
+func realizarVenta(d *distribuidor, surtidorID string, tipoCombustible string, litros float64) {
+	precioBase := 1.2 + rand.Float64()*0.8
+	precioFinal := precioBase * d.FactorUtilidad
+	total := litros * precioFinal
+
+	d.mutex.Lock()
+	venta := ventaCombustible{
+		DistribuidorID:  d.Distribuidor_ID,
+		ID_venta:        len(d.listaVentas) + 1,
+		SurtidorID:      surtidorID,
+		TipoCombustible: tipoCombustible,
+		LitrosVendidos:  litros,
+		PrecioPorLitro:  precioFinal,
+		TotalVenta:      total,
+		FechaVenta:      time.Now(),
+		NumeroFactura:   fmt.Sprintf("F-%s-%d", d.Distribuidor_ID, len(d.listaVentas)+1),
+		Persistida:      false,
+	}
+	d.listaVentas = append(d.listaVentas, venta)
+	d.mutex.Unlock()
+
+	fmt.Printf("Venta recibida de surtidor %s: %.2f L de %s\n", surtidorID, litros, tipoCombustible)
+}
+
 func actualizarBaseDatos(d *distribuidor) {
-	//revisar ventas no persistidas (que no hayan sido ingresadas)
 	d.mutex.Lock()
 	ventasNoPersistidas := make([]ventaCombustible, 0)
-
-	// Filtrar ventas no persistidas
 	for i, venta := range d.listaVentas {
 		if !venta.Persistida {
 			ventasNoPersistidas = append(ventasNoPersistidas, venta)
-			d.listaVentas[i].Persistida = true // marcar como persistida
+			d.listaVentas[i].Persistida = true
 		}
 	}
 	d.mutex.Unlock()
 
 	if len(ventasNoPersistidas) == 0 {
-		fmt.Printf("No hay ventas nuevas para persistir\n")
 		return
 	}
 
-	// Insertar en lote
 	tx, err := d.db.Begin()
 	if err != nil {
 		log.Printf("Error iniciando transacción: %v", err)
@@ -127,117 +225,53 @@ func actualizarBaseDatos(d *distribuidor) {
 	}
 	defer stmt.Close()
 
-	ventasInsertadas := 0
 	for _, venta := range ventasNoPersistidas {
-		_, err = stmt.Exec(
-			venta.DistribuidorID,
-			venta.HiloID,
-			venta.TipoCombustible,
-			venta.LitrosVendidos,
-			venta.PrecioPorLitro,
-			venta.TotalVenta,
-			venta.FechaVenta,
-			venta.NumeroFactura,
-		)
+		_, err = stmt.Exec(venta.DistribuidorID, venta.SurtidorID, venta.TipoCombustible, venta.LitrosVendidos, venta.PrecioPorLitro, venta.TotalVenta, venta.FechaVenta, venta.NumeroFactura)
 		if err != nil {
 			log.Printf("Error insertando venta %s: %v", venta.NumeroFactura, err)
 			continue
 		}
-		ventasInsertadas++
 	}
 
 	if err = tx.Commit(); err != nil {
 		log.Printf("Error confirmando transacción: %v", err)
 		return
 	}
-
-	fmt.Printf("✅ Base de datos actualizada: %d ventas insertadas\n", ventasInsertadas)
-}
-
-func realizarVenta(d *distribuidor, hiloID string) {
-	// Generar venta aleatoria
-	tipoCombustible := CombustibleAleatorio(rand.Intn(100))
-	litros := 5.0 + rand.Float64()*50.0    // entre 5 y 55 litros
-	precioBase := 1.2 + rand.Float64()*0.8 // precio base entre 1.2 y 2.0
-
-	// Aplicar factor de utilidad del distribuidor
-	precioFinal := precioBase * d.FactorUtilidad
-	total := litros * precioFinal
-
-	// Bloquear para acceso seguro a la lista
-	d.mutex.Lock()
-	venta := ventaCombustible{
-		DistribuidorID:  d.Distribuidor_ID,
-		ID_venta:        len(d.listaVentas) + 1,
-		HiloID:          hiloID,
-		TipoCombustible: tipoCombustible,
-		LitrosVendidos:  litros,
-		PrecioPorLitro:  precioFinal,
-		TotalVenta:      total,
-		FechaVenta:      time.Now(),
-		NumeroFactura:   fmt.Sprintf("F-%s-%d", d.Distribuidor_ID, len(d.listaVentas)+1),
-		Persistida:      false,
-	}
-
-	// Guardar en la lista del distribuidor
-	d.listaVentas = append(d.listaVentas, venta)
-	d.mutex.Unlock()
-
-	fmt.Printf("Venta realizada por %s (hilo %s): %.2f L de %s a $%.2f/L = $%.2f\n",
-		d.Distribuidor_ID, hiloID, litros, tipoCombustible, precioFinal, total)
-}
-
-func surtidor(d *distribuidor, surtidorID string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	fmt.Printf("Surtidor %s iniciado - vendiendo indefinidamente...\n", surtidorID)
-
-	for {
-		realizarVenta(d, surtidorID)
-		// Simular tiempo entre ventas (1-3 segundos)
-		time.Sleep(time.Duration(1+rand.Intn(3)) * time.Second)
-	}
+	fmt.Printf("✅ Base de datos actualizada: %d ventas insertadas\n", len(ventasNoPersistidas))
 }
 
 // ===== ENDPOINTS HTTP =====
 
-// Endpoint para verificar estado del distribuidor
 func statusHandler(dist *distribuidor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-
 		dist.mutex.Lock()
+		surtidorConnections.Lock()
 		response := map[string]interface{}{
-			"status":          "online",
-			"distribuidor_id": dist.Distribuidor_ID,
-			"factor_utilidad": dist.FactorUtilidad,
-			"total_ventas":    len(dist.listaVentas),
-			"timestamp":       time.Now(),
+			"status":             "online",
+			"distribuidor_id":    dist.Distribuidor_ID,
+			"surtidores_activos": len(surtidorConnections.conns),
+			"total_ventas":       len(dist.listaVentas),
+			"timestamp":          time.Now(),
 		}
+		surtidorConnections.Unlock()
 		dist.mutex.Unlock()
-
 		json.NewEncoder(w).Encode(response)
 	}
 }
 
-// Endpoint para obtener ventas recientes
 func ventasRecientesHandler(dist *distribuidor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-
-		// Obtener parámetro de límite (opcional)
 		limitStr := r.URL.Query().Get("limit")
-		limit := 20 // por defecto
+		limit := 20
 		if limitStr != "" {
 			if parsedLimit, err := strconv.Atoi(limitStr); err == nil && parsedLimit > 0 {
 				limit = parsedLimit
 			}
 		}
-
 		dist.mutex.Lock()
 		totalVentas := len(dist.listaVentas)
-
-		// Obtener las últimas ventas
 		var ventasRecientes []ventaCombustible
 		if totalVentas > 0 {
 			start := totalVentas - limit
@@ -246,14 +280,11 @@ func ventasRecientesHandler(dist *distribuidor) http.HandlerFunc {
 			}
 			ventasRecientes = make([]ventaCombustible, totalVentas-start)
 			copy(ventasRecientes, dist.listaVentas[start:])
-
-			// Invertir el orden para que las más recientes aparezcan primero
 			for i, j := 0, len(ventasRecientes)-1; i < j; i, j = i+1, j-1 {
 				ventasRecientes[i], ventasRecientes[j] = ventasRecientes[j], ventasRecientes[i]
 			}
 		}
 		dist.mutex.Unlock()
-
 		json.NewEncoder(w).Encode(ventasRecientes)
 	}
 }
@@ -264,12 +295,15 @@ func statsHandler(dist *distribuidor) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 
 		dist.mutex.Lock()
+		defer dist.mutex.Unlock()
+
+		surtidorConnections.Lock()
+		defer surtidorConnections.Unlock()
 
 		// Calcular estadísticas
 		totalVentas := len(dist.listaVentas)
 		var totalIngresos float64
 		var ventasHoy int
-		surtidoresActivos := 5 // Hardcoded por ahora
 
 		hoy := time.Now().Truncate(24 * time.Hour)
 
@@ -286,65 +320,96 @@ func statsHandler(dist *distribuidor) http.HandlerFunc {
 			"ventas_hoy":         ventasHoy,
 			"total_ingresos":     totalIngresos,
 			"factor_utilidad":    dist.FactorUtilidad,
-			"surtidores_activos": surtidoresActivos,
+			"surtidores_activos": len(surtidorConnections.conns), // Corregido
 			"timestamp":          time.Now(),
 		}
-
-		dist.mutex.Unlock()
 
 		json.NewEncoder(w).Encode(response)
 	}
 }
 
-// Configurar el servidor HTTP
+// NUEVO endpoint para controlar los surtidores
+func controlSurtidoresHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var payload struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Cuerpo de petición inválido", http.StatusBadRequest)
+		return
+	}
+
+	var command string
+	switch payload.Action {
+	case "pause":
+		command = "CMD:PAUSE\n"
+	case "resume":
+		command = "CMD:RESUME\n"
+	default:
+		http.Error(w, "Acción no válida. Usar 'pause' o 'resume'", http.StatusBadRequest)
+		return
+	}
+
+	surtidorConnections.Lock()
+	defer surtidorConnections.Unlock()
+
+	if len(surtidorConnections.conns) == 0 {
+		fmt.Println("No hay surtidores conectados para enviar comando.")
+		json.NewEncoder(w).Encode(map[string]string{"message": "No hay surtidores conectados."})
+		return
+	}
+
+	sentCount := 0
+	for conn := range surtidorConnections.conns {
+		_, err := conn.Write([]byte(command))
+		if err != nil {
+			log.Printf("Error enviando comando a %s: %v", conn.RemoteAddr(), err)
+		} else {
+			sentCount++
+		}
+	}
+
+	fmt.Printf("Comando '%s' enviado a %d surtidores.\n", payload.Action, sentCount)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":      fmt.Sprintf("Comando '%s' enviado", payload.Action),
+		"surtidores_afectados": sentCount,
+	})
+}
+
 func setupHTTPServer(dist *distribuidor) *http.Server {
 	r := mux.NewRouter()
-
-	// Configurar CORS
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"*"},
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
 	})
 
-	// Rutas
 	r.HandleFunc("/status", statusHandler(dist)).Methods("GET")
 	r.HandleFunc("/ventas/recientes", ventasRecientesHandler(dist)).Methods("GET")
-	r.HandleFunc("/stats", statsHandler(dist)).Methods("GET")
+	r.HandleFunc("/stats", statsHandler(dist)).Methods("GET") // Reactivado
+	r.HandleFunc("/surtidores/control", controlSurtidoresHandler).Methods("POST")
 
-	// Aplicar CORS
 	handler := c.Handler(r)
-
-	// Obtener puerto de variable de entorno o usar puerto por defecto
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // Puerto por defecto si no se especifica
+		port = "8080"
 	}
-
-	// Configurar servidor
-	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: handler,
-	}
-
-	return server
+	return &http.Server{Addr: ":" + port, Handler: handler}
 }
 
 func main() {
-	fmt.Println("--- Arrancando Backend Distribuidor ---")
+	fmt.Println("--- Arrancando Backend Distribuidor (Versión Servidor de Sockets) ---")
 
-	// Conectar a la base de datos
 	db, err := conectarDB()
 	if err != nil {
 		log.Printf("Advertencia: No se pudo conectar a la base de datos: %v", err)
-		// Continuar sin DB para desarrollo
 	}
 	if db != nil {
 		defer db.Close()
 	}
 
-	// Crear distribuidor con factor de utilidad aleatorio
-	factorUtilidad := 1.10 + rand.Float64()*0.20 // entre 1.10 (10%) y 1.30 (30%) de margen
+	factorUtilidad := 1.10 + rand.Float64()*0.20
 	id_distribuidor := os.Getenv("DISTRIBUIDOR_ID")
 	if id_distribuidor == "" {
 		id_distribuidor = "DISTRIBUIDOR_DEFAULT"
@@ -357,57 +422,39 @@ func main() {
 		db:              db,
 	}
 
-	fmt.Printf("Distribuidor %s iniciado con factor de utilidad: %.2f (%.0f%% margen)\n",
-		dist.Distribuidor_ID, factorUtilidad, (factorUtilidad-1)*100)
-
-	// Configurar servidor HTTP
-	server := setupHTTPServer(dist)
-
-	// Configuración de surtidores
-	numSurtidores := 5 // Cambia este número para crear N surtidores
-
-	var wg sync.WaitGroup
-
-	// Crear y ejecutar surtidores en paralelo (infinitamente)
-	for i := 1; i <= numSurtidores; i++ {
-		wg.Add(1)
-		surtidorID := fmt.Sprintf("surtidor-%d", i)
-		go surtidor(dist, surtidorID, &wg)
+	// Cargar datos existentes desde la base de datos
+	if db != nil {
+		if err := cargarVentasDesdeDB(dist); err != nil {
+			log.Printf("Error al cargar ventas desde la DB: %v", err)
+		}
 	}
 
-	// Goroutine para actualizar base de datos cada 5 segundos (solo si hay DB)
+	fmt.Printf("Distribuidor %s iniciado con factor de utilidad: %.2f\n", dist.Distribuidor_ID, factorUtilidad)
+
+	// Iniciar servidor de sockets en una goroutine
+	go iniciarServidorSockets(dist)
+
+	// Iniciar servidor HTTP en una goroutine
+	server := setupHTTPServer(dist)
+	go func() {
+		fmt.Printf("🌐 Servidor HTTP iniciado en puerto %s\n", server.Addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Error en servidor HTTP: %v", err)
+		}
+	}()
+
+	// Goroutine para actualizar base de datos
 	if db != nil {
 		go func() {
-			ticker := time.NewTicker(5 * time.Second)
+			ticker := time.NewTicker(10 * time.Second)
 			defer ticker.Stop()
-
 			for range ticker.C {
 				actualizarBaseDatos(dist)
 			}
 		}()
 	}
 
-	// Iniciar servidor HTTP en goroutine
-	go func() {
-		fmt.Printf("🌐 Servidor HTTP iniciado en puerto %s\n", server.Addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("Error en servidor HTTP: %v", err)
-		}
-	}()
-
-	// Variables de entorno
-	dbURL := os.Getenv("DATABASE_URL")
-	empresaHost := os.Getenv("EMPRESA_HOST")
-	fmt.Printf("DATABASE_URL: %s\n", dbURL)
-	fmt.Printf("EMPRESA_HOST: %s\n", empresaHost)
-
 	fmt.Println("\n🚀 Sistema iniciado correctamente!")
-	fmt.Println("📊 Endpoints disponibles:")
-	fmt.Printf("   - GET %s/status\n", server.Addr)
-	fmt.Printf("   - GET %s/ventas/recientes\n", server.Addr)
-	fmt.Printf("   - GET %s/stats\n", server.Addr)
-	fmt.Println("\nPresiona Ctrl+C para detener...")
-
-	// Esperar indefinidamente (los surtidores nunca terminan)
-	wg.Wait()
+	// Mantener la aplicación corriendo
+	select {}
 }
