@@ -22,7 +22,8 @@ const Surtidor = ({ distribuidorUrl }) => {
         };
 
         fetchVentas();
-        const interval = setInterval(fetchVentas, 2000);
+    // Polling más frecuente para el surtidor: cada 1 segundo
+    const interval = setInterval(fetchVentas, 1000);
         return () => clearInterval(interval);
     }, [surtidorId, distribuidorUrl]);
 

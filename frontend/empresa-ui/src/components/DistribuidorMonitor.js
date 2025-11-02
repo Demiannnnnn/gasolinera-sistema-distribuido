@@ -113,8 +113,8 @@ const DistribuidorMonitor = () => {
 
         if (paused) return; // no polling cuando está en pausa
 
-        // Actualizar cada 3 segundos
-        const interval = setInterval(updateDistribuidoresData, 3000);
+    // Actualizar cada 1 segundo (más en tiempo real)
+    const interval = setInterval(updateDistribuidoresData, 1000);
 
         return () => clearInterval(interval);
     }, [paused]);

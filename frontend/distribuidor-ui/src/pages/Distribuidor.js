@@ -54,7 +54,8 @@ const Distribuidor = ({ distributorId }) => {
     useEffect(() => {
         fetchDistribuidorData();
         if (paused) return;
-        const interval = setInterval(fetchDistribuidorData, 3000);
+    // polling más frecuente: cada 1 segundo
+    const interval = setInterval(fetchDistribuidorData, 1000);
         return () => clearInterval(interval);
     }, [distributorId, paused]);
 
