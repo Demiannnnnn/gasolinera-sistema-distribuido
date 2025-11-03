@@ -37,7 +37,7 @@ const (
 type ventaCombustible struct {
 	DistribuidorID  string    `json:"distribuidor_id"`
 	ID_venta        int       `json:"id"`
-	SurtidorID      string    `json:"surtidor_id"` // Renombrado de HiloID
+	HiloID          string    `json:"surtidor_id"` // Renombrado de HiloID
 	TipoCombustible string    `json:"tipo_combustible"`
 	LitrosVendidos  float64   `json:"litros_vendidos"`
 	PrecioPorLitro  float64   `json:"precio_por_litro"`
@@ -109,14 +109,14 @@ func handleSurtidorConnection(conn net.Conn, dist *distribuidor) {
 			continue
 		}
 
-		surtidorIDStr := strings.Split(parts[0], ":")[1]
+		hiloIDStr := strings.Split(parts[0], ":")[1]
 		litrosStr := strings.Split(parts[1], ":")[1]
 		tipo := strings.Split(parts[2], ":")[1]
 
 		litros, _ := strconv.ParseFloat(litrosStr, 64)
 
 		// Procesar la venta recibida
-	realizarVenta(dist, surtidorIDStr, tipo, litros)
+	realizarVenta(dist, hiloIDStr, tipo, litros)
 	}
 }
 
@@ -127,14 +127,32 @@ func conectarDB() (*sql.DB, error) {
 	if dbURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL no configurada")
 	}
-	db, err := sql.Open("postgres", dbURL)
-	if err != nil {
-		return nil, fmt.Errorf("error conectando a DB: %v", err)
+
+	var db *sql.DB
+	var err error
+	maxRetries := 5
+	retryDelay := 3 * time.Second
+
+	for i := 0; i < maxRetries; i++ {
+		db, err = sql.Open("postgres", dbURL)
+		if err != nil {
+			log.Printf("Intento %d/%d: Error al abrir la conexión a la DB: %v", i+1, maxRetries, err)
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		if err = db.Ping(); err != nil {
+			log.Printf("Intento %d/%d: Error al verificar la conexión a la DB: %v", i+1, maxRetries, err)
+			db.Close() // Cerrar la conexión fallida antes de reintentar
+			time.Sleep(retryDelay)
+			continue
+		}
+
+		fmt.Println("✅ Conexión a la base de datos establecida con éxito.")
+		return db, nil
 	}
-	if err = db.Ping(); err != nil {
-		return nil, fmt.Errorf("error verificando conexión DB: %v", err)
-	}
-	return db, nil
+
+	return nil, fmt.Errorf("no se pudo conectar a la base de datos después de %d intentos", maxRetries)
 }
 
 // Nueva función para cargar datos al iniciar
@@ -156,7 +174,7 @@ func cargarVentasDesdeDB(dist *distribuidor) error {
 	for rows.Next() {
 		var v ventaCombustible
 		// El ID de la venta no se escanea porque es autoincremental en la DB
-		if err := rows.Scan(&v.DistribuidorID, &v.ID_venta, &v.SurtidorID, &v.TipoCombustible, &v.LitrosVendidos, &v.PrecioPorLitro, &v.TotalVenta, &v.FechaVenta, &v.NumeroFactura); err != nil {
+		if err := rows.Scan(&v.DistribuidorID, &v.ID_venta, &v.HiloID, &v.TipoCombustible, &v.LitrosVendidos, &v.PrecioPorLitro, &v.TotalVenta, &v.FechaVenta, &v.NumeroFactura); err != nil {
 			log.Printf("Error al escanear fila de venta: %v", err)
 			continue
 		}
@@ -169,7 +187,7 @@ func cargarVentasDesdeDB(dist *distribuidor) error {
 	return nil
 }
 
-func realizarVenta(d *distribuidor, surtidorID string, tipoCombustible string, litros float64) {
+func realizarVenta(d *distribuidor, hiloID string, tipoCombustible string, litros float64) {
 	precioBase := 1.2 + rand.Float64()*0.8
 	precioFinal := precioBase * d.FactorUtilidad
 	total := litros * precioFinal
@@ -178,7 +196,7 @@ func realizarVenta(d *distribuidor, surtidorID string, tipoCombustible string, l
 	venta := ventaCombustible{
 		DistribuidorID:  d.Distribuidor_ID,
 		ID_venta:        len(d.listaVentas) + 1,
-		SurtidorID:      surtidorID,
+		HiloID:          hiloID,
 		TipoCombustible: tipoCombustible,
 		LitrosVendidos:  litros,
 		PrecioPorLitro:  precioFinal,
@@ -190,7 +208,7 @@ func realizarVenta(d *distribuidor, surtidorID string, tipoCombustible string, l
 	d.listaVentas = append(d.listaVentas, venta)
 	d.mutex.Unlock()
 
-	fmt.Printf("Venta recibida de surtidor %s: %.2f L de %s\n", surtidorID, litros, tipoCombustible)
+	fmt.Printf("Venta recibida de surtidor %s: %.2f L de %s\n", hiloID, litros, tipoCombustible)
 }
 
 func actualizarBaseDatos(d *distribuidor) {
@@ -226,7 +244,7 @@ func actualizarBaseDatos(d *distribuidor) {
 	defer stmt.Close()
 
 	for _, venta := range ventasNoPersistidas {
-		_, err = stmt.Exec(venta.DistribuidorID, venta.SurtidorID, venta.TipoCombustible, venta.LitrosVendidos, venta.PrecioPorLitro, venta.TotalVenta, venta.FechaVenta, venta.NumeroFactura)
+		_, err = stmt.Exec(venta.DistribuidorID, venta.HiloID, venta.TipoCombustible, venta.LitrosVendidos, venta.PrecioPorLitro, venta.TotalVenta, venta.FechaVenta, venta.NumeroFactura)
 		if err != nil {
 			log.Printf("Error insertando venta %s: %v", venta.NumeroFactura, err)
 			continue
@@ -403,11 +421,9 @@ func main() {
 
 	db, err := conectarDB()
 	if err != nil {
-		log.Printf("Advertencia: No se pudo conectar a la base de datos: %v", err)
+		log.Fatalf("No se pudo conectar a la base de datos después de varios intentos: %v", err)
 	}
-	if db != nil {
-		defer db.Close()
-	}
+	defer db.Close()
 
 	factorUtilidad := 1.10 + rand.Float64()*0.20
 	id_distribuidor := os.Getenv("DISTRIBUIDOR_ID")
