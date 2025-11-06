@@ -53,6 +53,7 @@ type distribuidor struct {
 	FactorUtilidad  float64
 	mutex           sync.Mutex
 	db              *sql.DB
+	preciosBase     map[string]float64
 }
 
 // --- Lógica de Sockets ---
@@ -188,11 +189,14 @@ func cargarVentasDesdeDB(dist *distribuidor) error {
 }
 
 func realizarVenta(d *distribuidor, hiloID string, tipoCombustible string, litros float64) {
-	precioBase := 1.2 + rand.Float64()*0.8
+	d.mutex.Lock()
+	precioBase, ok := d.preciosBase[tipoCombustible]
+	if !ok {
+		precioBase = 1.2 + rand.Float64()*0.8 // Fallback a un precio aleatorio si no está definido
+	}
 	precioFinal := precioBase * d.FactorUtilidad
 	total := litros * precioFinal
 
-	d.mutex.Lock()
 	venta := ventaCombustible{
 		DistribuidorID:  d.Distribuidor_ID,
 		ID_venta:        len(d.listaVentas) + 1,
@@ -256,6 +260,29 @@ func actualizarBaseDatos(d *distribuidor) {
 		return
 	}
 	fmt.Printf("✅ Base de datos actualizada: %d ventas insertadas\n", len(ventasNoPersistidas))
+}
+
+func updatePricesHandler(dist *distribuidor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var precios map[string]float64
+		if err := json.NewDecoder(r.Body).Decode(&precios); err != nil {
+			fmt.Printf("Error al decodificar el cuerpo de la solicitud de precios: %v\n", err)
+			http.Error(w, "Cuerpo de petición inválido", http.StatusBadRequest)
+			return
+		}
+
+		fmt.Printf("Recibida solicitud de actualización de precios: %+v\n", precios)
+
+		dist.mutex.Lock()
+		for tipo, precio := range precios {
+			dist.preciosBase[tipo] = precio
+		}
+		dist.mutex.Unlock()
+
+		fmt.Println("Precios actualizados correctamente")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "Precios actualizados correctamente"})
+	}
 }
 
 // ===== ENDPOINTS HTTP =====
@@ -339,6 +366,7 @@ func statsHandler(dist *distribuidor) http.HandlerFunc {
 			"total_ingresos":     totalIngresos,
 			"factor_utilidad":    dist.FactorUtilidad,
 			"surtidores_activos": len(surtidorConnections.conns), // Corregido
+			"precios_base":       dist.preciosBase,
 			"timestamp":          time.Now(),
 		}
 
@@ -407,6 +435,7 @@ func setupHTTPServer(dist *distribuidor) *http.Server {
 	r.HandleFunc("/ventas/recientes", ventasRecientesHandler(dist)).Methods("GET")
 	r.HandleFunc("/stats", statsHandler(dist)).Methods("GET") // Reactivado
 	r.HandleFunc("/surtidores/control", controlSurtidoresHandler).Methods("POST")
+	r.HandleFunc("/prices", updatePricesHandler(dist)).Methods("PUT")
 
 	handler := c.Handler(r)
 	port := os.Getenv("PORT")
@@ -436,6 +465,13 @@ func main() {
 		FactorUtilidad:  factorUtilidad,
 		listaVentas:     make([]ventaCombustible, 0),
 		db:              db,
+		preciosBase:     map[string]float64{
+			"93":       1.0,
+			"95":       1.1,
+			"97":       1.2,
+			"DIESEL":   0.9,
+			"KEROSENE": 0.8,
+		},
 	}
 
 	// Cargar datos existentes desde la base de datos

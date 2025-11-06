@@ -128,6 +128,15 @@ const Distribuidor = ({ distributorId }) => {
                 </div>
             </section>
 
+            <section className="stats-grid">
+                {distribuidor.stats?.precios_base && Object.entries(distribuidor.stats.precios_base).map(([tipo, precio]) => (
+                    <div className="stat-card" key={tipo}>
+                        <h3>Precio {tipo}</h3>
+                        <p className="stat-value">${precio.toFixed(2)}</p>
+                    </div>
+                ))}
+            </section>
+
             <main className="dist-main">
                 <aside className="surtidor-aside">
                     <h3>Surtidores</h3>

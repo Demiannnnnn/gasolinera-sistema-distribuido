@@ -1,128 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React from 'react';
 import DistribuidorCard from './DistribuidorCard';
 
-const DistribuidorMonitor = () => {
-    const [distribuidores, setDistribuidores] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const [paused, setPaused] = useState(false);
-    const [query, setQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
-
-    // Lista de distribuidores posibles (dinámico)
-    const distribuidoresConfig = [
-        { id: 'DISTRIBUIDOR_1', name: 'Punto de Venta 1', url: process.env.REACT_APP_DIST1_URL || 'http://localhost:8080', color: '#4CAF50' },
-        { id: 'DISTRIBUIDOR_2', name: 'Punto de Venta 2', url: process.env.REACT_APP_DIST2_URL || 'http://localhost:8083', color: '#2196F3' },
-        { id: 'DISTRIBUIDOR_3', name: 'Punto de Venta 3', url: process.env.REACT_APP_DIST3_URL || 'http://localhost:8084', color: '#9C27B0' }
-    ];
-
-    // Verificar qué distribuidores están activos
-    const checkDistribuidoresStatus = async () => {
-        const distribuidoresActivos = [];
-
-        for (const config of distribuidoresConfig) {
-            try {
-                // Intentar hacer ping al distribuidor
-                const response = await axios.get(`${config.url}/status`, {
-                    timeout: 3000
-                });
-
-                if (response.status === 200) {
-                    distribuidoresActivos.push({
-                        ...config,
-                        status: 'online',
-                        data: response.data,
-                        lastUpdate: new Date()
-                    });
-                }
-            } catch (error) {
-                // Si falla, aún lo agregamos pero como offline
-                distribuidoresActivos.push({
-                    ...config,
-                    status: 'offline',
-                    data: null,
-                    lastUpdate: new Date(),
-                    error: error.message
-                });
-            }
-        }
-
-        return distribuidoresActivos;
-    };
-
-    // Obtener datos de un distribuidor específico
-    const fetchDistribuidorData = async (distribuidor) => {
-        try {
-            const [ventasResponse, statsResponse] = await Promise.all([
-                axios.get(`${distribuidor.url}/ventas/recientes`, { timeout: 5000 }),
-                axios.get(`${distribuidor.url}/stats`, { timeout: 5000 })
-            ]);
-
-            return {
-                ...distribuidor,
-                status: 'online',
-                ventas: ventasResponse.data || [],
-                stats: statsResponse.data || {},
-                lastUpdate: new Date()
-            };
-        } catch (error) {
-            console.warn(`Error fetching data from ${distribuidor.name}:`, error.message);
-            return {
-                ...distribuidor,
-                status: 'offline',
-                ventas: [],
-                stats: {},
-                lastUpdate: new Date(),
-                error: error.message
-            };
-        }
-    };
-
-    // Actualizar datos de todos los distribuidores
-    const updateDistribuidoresData = async () => {
-        try {
-            setLoading(true);
-
-            // Primero verificar cuáles están activos
-            const distribuidoresActivos = await checkDistribuidoresStatus();
-
-            // Luego obtener datos detallados solo de los que están online
-            const distribuidoresConDatos = await Promise.all(
-                distribuidoresActivos.map(async (distribuidor) => {
-                    if (distribuidor.status === 'online') {
-                        return await fetchDistribuidorData(distribuidor);
-                    }
-                    return distribuidor;
-                })
-            );
-
-            setDistribuidores(distribuidoresConDatos);
-            setError(null);
-        } catch (error) {
-            console.error('Error updating distribuidores data:', error);
-            setError('Error al conectar con los distribuidores');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Efecto para cargar datos iniciales y configurar polling (respeta "paused")
-    useEffect(() => {
-        updateDistribuidoresData();
-
-        if (paused) return; // no polling cuando está en pausa
-
-    // Actualizar cada 1 segundo (más en tiempo real)
-    const interval = setInterval(updateDistribuidoresData, 1000);
-
-        return () => clearInterval(interval);
-    }, [paused]);
-
-    // Funciones de utilidad
-    const getDistribuidoresOnline = () => distribuidores.filter(d => d.status === 'online').length;
-    const getTotalVentas = () => distribuidores.reduce((total, d) => total + (d.stats?.total_ventas || 0), 0);
-    const getTotalIngresos = () => distribuidores.reduce((total, d) => total + (d.stats?.total_ingresos || 0), 0);
+const DistribuidorMonitor = ({
+    distribuidores,
+    loading,
+    error,
+    paused,
+    setPaused,
+    query,
+    setQuery,
+    statusFilter,
+    setStatusFilter,
+    handleUpdatePrices,
+    getDistribuidoresOnline,
+    getTotalVentas,
+    getTotalIngresos
+}) => {
 
     if (loading && distribuidores.length === 0) {
         return (
@@ -136,7 +29,7 @@ const DistribuidorMonitor = () => {
     }
 
     return (
-        <div>
+        <div className="monitor-content-wrapper">
             {/* Controls: search, filter, pause */}
             <div className="control-bar" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -206,6 +99,7 @@ const DistribuidorMonitor = () => {
                         <DistribuidorCard
                             key={distribuidor.id}
                             distribuidor={distribuidor}
+                            onUpdatePrices={handleUpdatePrices}
                         />
                     ))}
             </div>

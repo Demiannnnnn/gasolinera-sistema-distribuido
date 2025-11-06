@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import PriceUpdateForm from './PriceUpdateForm';
 
-const DistribuidorCard = ({ distribuidor }) => {
+const DistribuidorCard = ({ distribuidor, onUpdatePrices }) => {
     const {
         id,
         name,
@@ -75,6 +76,12 @@ const DistribuidorCard = ({ distribuidor }) => {
                             <p className="stat-label">Factor util.</p>
                         </div>
                     </div>
+
+                    {expanded && (
+                        <div className="price-update-section">
+                            <PriceUpdateForm distribuidor={distribuidor} onUpdatePrices={onUpdatePrices} />
+                        </div>
+                    )}
 
                     {expanded && (
                         <div className="transactions-section">

@@ -433,3 +433,70 @@
 @media (max-width: 480px) {
   .login-form { padding: 18px; }
 }
+.prices-sidebar {
+    width: 250px;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border-left: 1px solid #eee;
+}
+
+/* Existing styles */
+
+.distribuidor-prices h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.distribuidor-prices ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.distribuidor-prices li {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+}
+
+
+.prices-sidebar {
+    width: 250px;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border-left: 1px solid #eee;
+}
+
+.distribuidor-prices h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.distribuidor-prices ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.distribuidor-prices li {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.App-main-layout {
+    display: flex;
+    justify-content: center; /* Centra el contenido principal */
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.monitor-content-wrapper {
+    max-width: 1200px; /* Ancho máximo para el contenido principal */
+    width: 100%;
+}
+

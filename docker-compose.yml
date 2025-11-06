@@ -81,9 +81,9 @@ services:
     environment:
       # Conexión a su propia DB
       DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db_empresa:5432/db_empresa?sslmode=disable"
-      DISTRIBUIDOR_1_HOST: "distribuidor1:8081"
-      DISTRIBUIDOR_2_HOST: "distribuidor2:8083"
-      DISTRIBUIDOR_3_HOST: "distribuidor3:8084"
+      DISTRIBUIDOR_1_HOST: "http://distribuidor1:8080"
+      DISTRIBUIDOR_2_HOST: "http://distribuidor2:8083"
+      DISTRIBUIDOR_3_HOST: "http://distribuidor3:8084"
     depends_on:
       - db_empresa
 
