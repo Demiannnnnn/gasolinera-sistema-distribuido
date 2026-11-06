@@ -1,8 +1,12 @@
 import { render, screen } from '@testing-library/react';
+import axios from 'axios';
 import App from './App';
 
-test('renders learn react link', () => {
+jest.mock('axios', () => ({ get: jest.fn() }));
+
+test('muestra el encabezado del monitor y el estado de carga inicial', () => {
+  axios.get.mockReturnValue(new Promise(() => {}));
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(screen.getByText(/Monitor de Distribuidores/i)).toBeInTheDocument();
+  expect(screen.getByText(/Conectando con distribuidores/i)).toBeInTheDocument();
 });

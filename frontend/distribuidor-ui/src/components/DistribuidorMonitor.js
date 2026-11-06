@@ -112,6 +112,8 @@ const DistribuidorMonitor = () => {
         const interval = setInterval(updateDistribuidoresData, 3000);
 
         return () => clearInterval(interval);
+        // Polling iniciado solo al montar; la función no depende de props ni estado.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Funciones de utilidad

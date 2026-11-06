@@ -59,7 +59,7 @@ const DistribuidorCard = ({ distribuidor }) => {
                 <>
                     <div className="stats-grid">
                         <div className="stat-item">
-                            <h3 className="stat-value">{stats.total_ventas || 0}</h3>
+                            <h3 className="stat-value">{stats.ventas_hoy || 0}</h3>
                             <p className="stat-label">Ventas Hoy</p>
                         </div>
                         <div className="stat-item">
