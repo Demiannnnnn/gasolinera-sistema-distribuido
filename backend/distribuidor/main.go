@@ -91,15 +91,14 @@ func conectarDB() (*sql.DB, error) {
 }
 
 func actualizarBaseDatos(d *distribuidor) {
-	//revisar ventas no persistidas (que no hayan sido ingresadas)
+	// Revisar ventas no persistidas (que no hayan sido ingresadas)
 	d.mutex.Lock()
 	ventasNoPersistidas := make([]ventaCombustible, 0)
 
-	// Filtrar ventas no persistidas
-	for i, venta := range d.listaVentas {
+	// Filtrar copia de ventas no persistidas SIN marcarlas
+	for _, venta := range d.listaVentas {
 		if !venta.Persistida {
 			ventasNoPersistidas = append(ventasNoPersistidas, venta)
-			d.listaVentas[i].Persistida = true // marcar como persistida
 		}
 	}
 	d.mutex.Unlock()
@@ -127,7 +126,6 @@ func actualizarBaseDatos(d *distribuidor) {
 	}
 	defer stmt.Close()
 
-	ventasInsertadas := 0
 	for _, venta := range ventasNoPersistidas {
 		_, err = stmt.Exec(
 			venta.DistribuidorID,
@@ -141,15 +139,30 @@ func actualizarBaseDatos(d *distribuidor) {
 		)
 		if err != nil {
 			log.Printf("Error insertando venta %s: %v", venta.NumeroFactura, err)
-			continue
+			return
 		}
-		ventasInsertadas++
 	}
 
 	if err = tx.Commit(); err != nil {
 		log.Printf("Error confirmando transacción: %v", err)
 		return
 	}
+
+	// Solo tras Commit() exitoso, con el mutex, marcar Persistida = true en d.listaVentas identificando cada venta por NumeroFactura
+	facturasPersistidas := make(map[string]bool, len(ventasNoPersistidas))
+	for _, v := range ventasNoPersistidas {
+		facturasPersistidas[v.NumeroFactura] = true
+	}
+
+	d.mutex.Lock()
+	ventasInsertadas := 0
+	for i := range d.listaVentas {
+		if !d.listaVentas[i].Persistida && facturasPersistidas[d.listaVentas[i].NumeroFactura] {
+			d.listaVentas[i].Persistida = true
+			ventasInsertadas++
+		}
+	}
+	d.mutex.Unlock()
 
 	fmt.Printf("✅ Base de datos actualizada: %d ventas insertadas\n", ventasInsertadas)
 }

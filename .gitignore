@@ -34,3 +34,5 @@ go.work.sum
 # binarios de go build
 backend/distribuidor/distribuidor
 backend/empresa/empresa
+
+.DS_Store
