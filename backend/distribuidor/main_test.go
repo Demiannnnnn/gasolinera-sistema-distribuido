@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"math"
@@ -374,9 +375,22 @@ func TestActualizarBaseDatosErrorEnBeginNoEntraEnPanico(t *testing.T) {
 	}
 }
 
-// Documenta el comportamiento actual. Ojo: en PostgreSQL real, un error dentro de
-// la transacción la aborta y las inserciones siguientes también fallan.
-func TestActualizarBaseDatosErrorEnUnaVentaContinuaConLasDemas(t *testing.T) {
+type callbackArg struct {
+	cb func()
+}
+
+func (c callbackArg) Match(v driver.Value) bool {
+	if c.cb != nil {
+		c.cb()
+	}
+	return true
+}
+
+// Reemplaza a TestActualizarBaseDatosErrorEnUnaVentaContinuaConLasDemas.
+// El comportamiento viejo erróneo continuaba con la siguiente venta en una transacción ya abortada
+// y dejaba las ventas marcadas erróneamente. El comportamiento correcto es hacer Rollback ante error
+// en Exec, no marcar ninguna venta, y permitir que en una segunda llamada exitosa se inserten y marquen todas.
+func TestActualizarBaseDatosErrorEnExecHaceRollbackYReintenta(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -385,17 +399,163 @@ func TestActualizarBaseDatosErrorEnUnaVentaContinuaConLasDemas(t *testing.T) {
 
 	d := nuevoDistribuidor(1.1)
 	d.db = db
-	d.listaVentas = []ventaCombustible{{NumeroFactura: "F-1"}, {NumeroFactura: "F-2"}}
+	d.listaVentas = []ventaCombustible{
+		{NumeroFactura: "F-1", DistribuidorID: "DIST_TEST", HiloID: "s1", TipoCombustible: "95", LitrosVendidos: 10, PrecioPorLitro: 2, TotalVenta: 20},
+		{NumeroFactura: "F-2", DistribuidorID: "DIST_TEST", HiloID: "s2", TipoCombustible: "93", LitrosVendidos: 15, PrecioPorLitro: 2, TotalVenta: 30},
+	}
 
+	// 1. Primer intento: error en Exec de la primera venta -> ExpectRollback y ninguna persistida
 	mock.ExpectBegin()
 	prep := mock.ExpectPrepare(insertRegex)
-	prep.ExpectExec().WillReturnError(errors.New("violación de restricción"))
-	prep.ExpectExec().WillReturnResult(sqlmock.NewResult(1, 1))
+	prep.ExpectExec().WithArgs("DIST_TEST", "s1", "95", 10.0, 2.0, 20.0, sqlmock.AnyArg(), "F-1").
+		WillReturnError(errors.New("error en exec"))
+	mock.ExpectRollback()
+
+	actualizarBaseDatos(d)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectativas no cumplidas en primer intento: %v", err)
+	}
+
+	for _, v := range d.listaVentas {
+		if v.Persistida {
+			t.Errorf("venta %s no debería quedar marcada como persistida tras error en Exec", v.NumeroFactura)
+		}
+	}
+
+	// 2. Segundo intento exitoso: todas se insertan y quedan marcadas
+	mock.ExpectBegin()
+	prep2 := mock.ExpectPrepare(insertRegex)
+	prep2.ExpectExec().WithArgs("DIST_TEST", "s1", "95", 10.0, 2.0, 20.0, sqlmock.AnyArg(), "F-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	prep2.ExpectExec().WithArgs("DIST_TEST", "s2", "93", 15.0, 2.0, 30.0, sqlmock.AnyArg(), "F-2").
+		WillReturnResult(sqlmock.NewResult(2, 1))
 	mock.ExpectCommit()
 
 	actualizarBaseDatos(d)
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Error(err)
+		t.Fatalf("expectativas no cumplidas en segundo intento: %v", err)
+	}
+
+	for _, v := range d.listaVentas {
+		if !v.Persistida {
+			t.Errorf("venta %s debería quedar marcada como persistida tras reintento exitoso", v.NumeroFactura)
+		}
+	}
+}
+
+func TestActualizarBaseDatosErrorEnCommitNadaMarcado(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	d := nuevoDistribuidor(1.1)
+	d.db = db
+	d.listaVentas = []ventaCombustible{
+		{NumeroFactura: "F-1", DistribuidorID: "DIST_TEST", HiloID: "s1", TipoCombustible: "95", LitrosVendidos: 10, PrecioPorLitro: 2, TotalVenta: 20},
+	}
+
+	mock.ExpectBegin()
+	prep := mock.ExpectPrepare(insertRegex)
+	prep.ExpectExec().WithArgs("DIST_TEST", "s1", "95", 10.0, 2.0, 20.0, sqlmock.AnyArg(), "F-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit().WillReturnError(errors.New("error confirmando transaccion"))
+
+	actualizarBaseDatos(d)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectativas no cumplidas: %v", err)
+	}
+
+	if d.listaVentas[0].Persistida {
+		t.Errorf("venta F-1 no debería estar persistida tras fallo en commit")
+	}
+}
+
+func TestActualizarBaseDatosExitoTodasMarcadas(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	d := nuevoDistribuidor(1.1)
+	d.db = db
+	d.listaVentas = []ventaCombustible{
+		{NumeroFactura: "F-1", DistribuidorID: "DIST_TEST", HiloID: "s1", TipoCombustible: "95", LitrosVendidos: 10, PrecioPorLitro: 2, TotalVenta: 20},
+		{NumeroFactura: "F-2", DistribuidorID: "DIST_TEST", HiloID: "s2", TipoCombustible: "97", LitrosVendidos: 20, PrecioPorLitro: 2, TotalVenta: 40},
+	}
+
+	mock.ExpectBegin()
+	prep := mock.ExpectPrepare(insertRegex)
+	prep.ExpectExec().WithArgs("DIST_TEST", "s1", "95", 10.0, 2.0, 20.0, sqlmock.AnyArg(), "F-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	prep.ExpectExec().WithArgs("DIST_TEST", "s2", "97", 20.0, 2.0, 40.0, sqlmock.AnyArg(), "F-2").
+		WillReturnResult(sqlmock.NewResult(2, 1))
+	mock.ExpectCommit()
+
+	actualizarBaseDatos(d)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectativas no cumplidas: %v", err)
+	}
+
+	for _, v := range d.listaVentas {
+		if !v.Persistida {
+			t.Errorf("venta %s debería quedar marcada como persistida", v.NumeroFactura)
+		}
+	}
+}
+
+func TestActualizarBaseDatosVentaAnadidaMientrasTantoSigueNoPersistida(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	d := nuevoDistribuidor(1.1)
+	d.db = db
+	d.listaVentas = []ventaCombustible{
+		{NumeroFactura: "F-1", DistribuidorID: "DIST_TEST", HiloID: "s1", TipoCombustible: "95", LitrosVendidos: 10, PrecioPorLitro: 2, TotalVenta: 20},
+	}
+
+	saleAdded := false
+	callback := callbackArg{
+		cb: func() {
+			if !saleAdded {
+				saleAdded = true
+				realizarVenta(d, "surtidor-concurrente")
+			}
+		},
+	}
+
+	mock.ExpectBegin()
+	prep := mock.ExpectPrepare(insertRegex)
+	prep.ExpectExec().WithArgs(callback, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
+		sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "F-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	actualizarBaseDatos(d)
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectativas no cumplidas: %v", err)
+	}
+
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	if len(d.listaVentas) != 2 {
+		t.Fatalf("esperaba 2 ventas en la lista, obtuve %d", len(d.listaVentas))
+	}
+	if !d.listaVentas[0].Persistida {
+		t.Errorf("la venta F-1 del lote original debería estar persistida")
+	}
+	if d.listaVentas[1].Persistida {
+		t.Errorf("la venta nueva añadida durante la transacción NO debería estar persistida")
 	}
 }
